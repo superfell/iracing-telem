@@ -1,3 +1,4 @@
+use super::makelong;
 use bitflags::bitflags;
 use num::ToPrimitive;
 use num_derive::{FromPrimitive, ToPrimitive};
@@ -396,7 +397,13 @@ pub enum FFBCommand {
 impl FFBCommand {
     fn params(&self) -> (i16, isize) {
         match self {
-            FFBCommand::MaxForce(f) => (0, (*f * 65536.0f32) as isize),
+            FFBCommand::MaxForce(f) => {
+                // in c assigning an int to an LPARAM (long) doesn't fill any of the new MSB.
+                // int x = 0xFFFFFFFF; LPARAM x2 = x; // x2 is 00000000FFFFFFFF;
+                // in rust casting the sign gets extended so 0xFFFFFFFF becomes 0xFFFFFFFFFFFFFFFF
+                // which is why we have the extra &
+                (0, (((*f * 65536.0) as isize) & 0x00000000FFFFFFFF))
+            }
         }
     }
 }
@@ -415,8 +422,30 @@ impl VideoCapture {
         self.to_i16().unwrap()
     }
 }
-fn makelong(var1: i16, var2: i16) -> isize {
-    // aka MAKELONG
-    let x = ((var1 as u32 & 0xFFFFu32) as u32) | (((var2 as u32) & 0xFFFFu32) << 16);
-    x as isize
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_pitcommand() {
+        assert_eq!(PitCommand::Fuel(Some(12)).params(), (2, 12));
+        assert_eq!(PitCommand::Fuel(None).params(), (2, 0));
+    }
+
+    #[test]
+    fn test_ffb() {
+        assert_eq!(FFBCommand::MaxForce(50.0).params(), (0, 0x320000));
+        assert_eq!(FFBCommand::MaxForce(0.0).params(), (0, 0x00000000));
+        assert_eq!(FFBCommand::MaxForce(42.42).params(), (0, 0x2a6b85));
+        assert_eq!(FFBCommand::MaxForce(-1.0).params(), (0, 0xffff0000));
+    }
+    #[test]
+    fn test_bcast_msg() {
+        assert_eq!(
+            BroadcastMsg::PitCommand(PitCommand::LF(Some(140))).params(),
+            (9, (3, 140))
+        )
+    }
 }

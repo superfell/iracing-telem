@@ -214,7 +214,7 @@ impl Session {
         let r = SendNotifyMessageA(
             HWND_BROADCAST,
             self.conn.broadcast_msg_id,
-            WPARAM(x),
+            WPARAM(x as usize),
             LPARAM(var2),
         );
         if r.as_bool() {
@@ -224,10 +224,10 @@ impl Session {
         }
     }
 }
-fn makelong(var1: i16, var2: i16) -> usize {
+fn makelong(var1: i16, var2: i16) -> isize {
     // aka MAKELONG
-    let x = ((var1 as u32 & 0xFFFFu32) as u32) | (((var2 as u32) & 0xFFFFu32) << 16);
-    x as usize
+    let x = ((var1 as u32) & 0xFFFF) | (((var2 as u32) & 0xFFFF) << 16);
+    x as isize
 }
 
 pub struct Var {
@@ -654,5 +654,33 @@ impl FromValue for flags::PaceFlags {
     fn var_result(value: &Value) -> Result<Self, Error> {
         let v = value.as_i32()?;
         Ok(Self::from_bits_truncate(v))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_makelong() {
+        assert_eq!(makelong(0, 0), 0);
+        assert_eq!(makelong(0, 0x12), 0x00120000);
+        assert_eq!(makelong(0x12, 0), 0x12);
+        assert_eq!(makelong(0x12, 0x24), 0x00240012);
+        assert_eq!(makelong(-1, -1), 0xFFFFFFFF);
+        assert_eq!(makelong(0, -1), 0xFFFF0000);
+        assert_eq!(makelong(-1, 0), 0x0000FFFF);
+        assert_eq!(makelong(0x1234, 0x5678), 0x56781234);
+        // sanity check the as usize cast for WPARAM;
+        let m = |a, b| makelong(a, b) as usize;
+        assert_eq!(m(0, 0), 0);
+        assert_eq!(m(0, 0x12), 0x00120000);
+        assert_eq!(m(0x12, 0), 0x12);
+        assert_eq!(m(0x12, 0x24), 0x00240012);
+        assert_eq!(m(-1, -1), 0xFFFFFFFF);
+        assert_eq!(m(0, -1), 0xFFFF0000);
+        assert_eq!(m(-1, 0), 0x0000FFFF);
+        assert_eq!(m(0x1234, 0x5678), 0x56781234);
     }
 }
