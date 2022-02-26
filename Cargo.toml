@@ -28,3 +28,6 @@ features = [
     "Win32_System_Memory",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[package.metadata.docs.rs]
+default-target="x86_64-pc-windows-msvc"
