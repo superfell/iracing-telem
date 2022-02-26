@@ -286,7 +286,14 @@ impl Session {
             var.session_id, self.session_id,
             "programmer error, Var was issued by a different Session"
         );
-        let x = self.data.as_ptr().add(var.hdr.offset as usize);
+        // verify that value is inside the buffer
+        let var_offset = var.hdr.offset as usize;
+        assert!(
+            var.size() + var_offset <= self.data.len(),
+            "The value appears to be outside the buffer"
+        );
+
+        let x = self.data.as_ptr().add(var_offset);
         if var.hdr.count == 1 {
             match var.hdr.var_type {
                 VarType::Char => Value::Char(*x),
@@ -400,6 +407,10 @@ impl Var {
     /// Values for Var's with a count > 1 are returned as slices of the relevent type
     pub fn count(&self) -> usize {
         self.hdr.count as usize
+    }
+    /// returns the size of a value for this Var in bytes.
+    fn size(&self) -> usize {
+        return self.var_type().size() * self.count();
     }
 }
 impl fmt::Debug for Var {
@@ -620,7 +631,19 @@ pub enum VarType {
     #[deprecated]
     Etcount = 6,
 }
-
+impl VarType {
+    fn size(&self) -> usize {
+        match *self {
+            VarType::Char => 1,
+            VarType::Bool => 1,
+            VarType::Int => 4,
+            VarType::Bitfield => 4,
+            VarType::Float => 4,
+            VarType::Double => 8,
+            _ => todo!(), //Etcount
+        }
+    }
+}
 /// An instance of a value for a variable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value<'a> {
@@ -842,5 +865,37 @@ mod tests {
         assert_eq!(m(0, -1), 0xFFFF0000);
         assert_eq!(m(-1, 0), 0x0000FFFF);
         assert_eq!(m(0x1234, 0x5678), 0x56781234);
+    }
+
+    #[test]
+    fn test_var_size() {
+        let f = |t, c| {
+            Var {
+                session_id: 0,
+                hdr: IrsdkVarHeader {
+                    var_type: t,
+                    offset: 0,
+                    count: c,
+                    count_as_time: 0,
+                    pad: [0, 0, 0], // (16 byte align)
+                    name: [0; IRSDK_MAX_STRING],
+                    desc: [0; IRSDK_MAX_DESC],
+                    unit: [0; IRSDK_MAX_STRING],
+                },
+            }
+        };
+        assert_eq!(512, f(VarType::Double, 64).size());
+        assert_eq!(24, f(VarType::Double, 3).size());
+        assert_eq!(8, f(VarType::Double, 1).size());
+        assert_eq!(12, f(VarType::Float, 3).size());
+        assert_eq!(4, f(VarType::Float, 1).size());
+        assert_eq!(12, f(VarType::Int, 3).size());
+        assert_eq!(4, f(VarType::Int, 1).size());
+        assert_eq!(12, f(VarType::Bitfield, 3).size());
+        assert_eq!(4, f(VarType::Bitfield, 1).size());
+        assert_eq!(3, f(VarType::Char, 3).size());
+        assert_eq!(1, f(VarType::Char, 1).size());
+        assert_eq!(3, f(VarType::Bool, 3).size());
+        assert_eq!(1, f(VarType::Bool, 1).size());
     }
 }
