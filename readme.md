@@ -6,6 +6,7 @@ It allows for access to telemetetry data from a running instance of the iRacing 
 as well as the ability to send certain control messages to the simulator (e.g to change Pitstop settings)
 
 docs: <https://docs.rs/iracing-telem/latest/iracing_telem/>
+
 crate: <https://crates.io/crates/iracing-telem/>
 
 The iRacing data is exposed through a memory mapped file. Because of this, and the potential issue
