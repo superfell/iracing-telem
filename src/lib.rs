@@ -230,8 +230,6 @@ impl Session {
     /// unable to find a matching item. The return Var is only
     /// valid for use with the Session that created it.
     ///
-    /// TODO: what happens if you call find_var after the session has expired?
-    ///
     /// # Safety
     /// see details on Session
     pub unsafe fn find_var(&self, name: &str) -> Option<Var> {

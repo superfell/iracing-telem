@@ -21,7 +21,7 @@ fn main() {
                     let rpm: f32 = s.var_value(&vrpm).as_f32().unwrap();
                     println!("{:?} {:<14.3}{:.1}", st, tm, rpm);
                 }
-                DataUpdateResult::NoUpdate => unreachable!(),
+                DataUpdateResult::NoUpdate => {}
                 DataUpdateResult::FailedToCopyRow => {
                     println!("too slow")
                 }
