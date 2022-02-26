@@ -44,6 +44,7 @@ pub const IRSDK_UNLIMITED_TIME: f64 = 604800.0;
 
 /// Client is main entry point into the library. Create a client and then you can
 /// access Sessions that have the telemetry data in then.
+#[derive(Debug)]
 pub struct Client {
     conn: Option<Rc<Connection>>,
     // Incremented each time we issue a new session. Allows for session to determine its expired even if
