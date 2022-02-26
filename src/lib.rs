@@ -534,6 +534,7 @@ impl Drop for Connection {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct IrsdkBuf {
     tick_count: i32, // used to detect changes in data
     buf_offset: i32, // offset from header
@@ -541,6 +542,7 @@ struct IrsdkBuf {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct IrsdkHeader {
     ver: i32,                   // this api header version, see IRSDK_VER
     status: flags::StatusField, // bitfield using irsdk_StatusField
@@ -843,6 +845,10 @@ impl FromValue for flags::PaceFlags {
 #[cfg(test)]
 mod tests {
 
+    use std::ptr;
+
+    use crate::flags::StatusField;
+
     use super::*;
 
     #[test]
@@ -919,5 +925,160 @@ mod tests {
         assert!(h.has_name("bob"));
         assert!(!h.has_name("alice"));
         assert!(!h.has_name("bobby"));
+    }
+
+    #[test]
+    fn test_var_value() {
+        let b = || IrsdkBuf {
+            tick_count: 1,
+            buf_offset: 0,
+            pad: [0, 2],
+        };
+        let mut h = IrsdkHeader {
+            ver: 2,
+            status: StatusField::CONNECTED,
+            tick_rate: 60,
+            session_info_update: 1,
+            session_info_len: 0,
+            session_info_offset: 100,
+            num_vars: 0,
+            var_header_offset: 0,
+            num_buf: 3,
+            buf_len: 12,
+            pad1: [0; 2],
+            var_buf: [b(), b(), b(), b()],
+        };
+        let mut s = Session {
+            session_id: 1,
+            conn: Rc::new(Connection {
+                file_mapping: HANDLE::default(),
+                shared_mem: ptr::null_mut(),
+                header: ptr::addr_of_mut!(h),
+                new_data: HANDLE::default(),
+                broadcast_msg_id: 1,
+            }),
+            last_tick_count: 1,
+            data: bytes::BytesMut::new(),
+            expired: false,
+        };
+        // char/bool
+        s.data.extend_from_slice(&[55, 56, 57, 58, 1, 0, 1, 0]);
+        // int
+        s.data.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        // float
+        s.data
+            .extend_from_slice(&[0x00, 0x00, 0x80, 0x3f, 0, 0, 0, 0xc0]);
+        // double
+        s.data
+            .extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0xc0, 2, 0, 0, 0, 0, 0, 0xF0, 0x3F]);
+        let v = |t, o, c| Var {
+            hdr: IrsdkVarHeader {
+                var_type: t,
+                offset: o,
+                count: c,
+                count_as_time: 0,
+                pad: [0; 3],
+                name: [0; IRSDK_MAX_STRING],
+                desc: [0; IRSDK_MAX_DESC],
+                unit: [0; IRSDK_MAX_STRING],
+            },
+            session_id: 1,
+        };
+        unsafe {
+            assert_eq!(s.var_value(&v(VarType::Char, 0, 1)), Value::Char(55));
+            assert_eq!(s.var_value(&v(VarType::Char, 1, 1)), Value::Char(56));
+            assert_eq!(s.var_value(&v(VarType::Bool, 4, 1)), Value::Bool(true));
+            assert_eq!(s.var_value(&v(VarType::Bool, 5, 1)), Value::Bool(false));
+            assert_eq!(s.var_value(&v(VarType::Int, 8, 1)), Value::Int(0x04030201));
+            assert_eq!(
+                s.var_value(&v(VarType::Bitfield, 8, 1)),
+                Value::Bitfield(0x04030201)
+            );
+            assert_eq!(s.var_value(&v(VarType::Float, 16, 1)), Value::Float(1.0));
+            assert_eq!(s.var_value(&v(VarType::Float, 20, 1)), Value::Float(-2.0));
+            assert_eq!(s.var_value(&v(VarType::Double, 24, 1)), Value::Double(-2.0));
+            assert_eq!(
+                s.var_value(&v(VarType::Double, 32, 1)),
+                Value::Double(1.0000000000000004)
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Char, 0, 3)),
+                Value::Chars(&[55, 56, 57])
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Bool, 4, 4)),
+                Value::Bools(&[true, false, true, false])
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Int, 8, 2)),
+                Value::Ints(&[0x04030201, 0x08070605])
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Bitfield, 8, 2)),
+                Value::Bitfields(&[0x04030201, 0x08070605])
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Float, 16, 2)),
+                Value::Floats(&[1.0, -2.0])
+            );
+            assert_eq!(
+                s.var_value(&v(VarType::Double, 24, 2)),
+                Value::Doubles(&[-2.0, 1.0000000000000004])
+            );
+        }
+    }
+    #[test]
+    #[should_panic]
+    fn test_cant_read_past_buffer() {
+        // ugh, need something better for setting these types of tests up.
+        let b = || IrsdkBuf {
+            tick_count: 1,
+            buf_offset: 0,
+            pad: [0, 2],
+        };
+        let mut h = IrsdkHeader {
+            ver: 2,
+            status: StatusField::CONNECTED,
+            tick_rate: 60,
+            session_info_update: 1,
+            session_info_len: 0,
+            session_info_offset: 100,
+            num_vars: 0,
+            var_header_offset: 0,
+            num_buf: 3,
+            buf_len: 12,
+            pad1: [0; 2],
+            var_buf: [b(), b(), b(), b()],
+        };
+        let mut s = Session {
+            session_id: 1,
+            conn: Rc::new(Connection {
+                file_mapping: HANDLE::default(),
+                shared_mem: ptr::null_mut(),
+                header: ptr::addr_of_mut!(h),
+                new_data: HANDLE::default(),
+                broadcast_msg_id: 1,
+            }),
+            last_tick_count: 1,
+            data: bytes::BytesMut::new(),
+            expired: false,
+        };
+        s.data.extend_from_slice(&[1, 2, 3, 4]);
+        let v = Var {
+            hdr: IrsdkVarHeader {
+                var_type: VarType::Int,
+                offset: 2,
+                count: 1,
+                count_as_time: 0,
+                pad: [0; 3],
+                name: [0; IRSDK_MAX_STRING],
+                desc: [0; IRSDK_MAX_DESC],
+                unit: [0; IRSDK_MAX_STRING],
+            },
+            session_id: 1,
+        };
+        unsafe {
+            s.var_value(&v);
+        }
     }
 }
