@@ -1,3 +1,16 @@
+//! iracing-telem is a rust port of the iRacing provided c++ SDK.
+//!
+//! It allows for access to telemetetry data from a running instance of the iRacing simulator
+//! As well as the ability to send certain control messages to the simulator (e.g to change
+//! Pitstop settings)
+//!
+//! The iRacing data is exposed through a memory mapped file. Because of this, and the potential
+//! issue for the data to not be in the expected locations almost all methods are marked as unsafe.
+//!
+//! Details of the c++ SDK are available on the iRacing forums. Note you will need an active
+//! iRacing subsription to access these.
+//!
+//! <https://forums.iracing.com/discussion/62/iracing-sdk>
 use core::fmt;
 use encoding::all::WINDOWS_1252;
 use encoding::{DecoderTrap, Encoding};
@@ -23,16 +36,22 @@ const IRSDK_MAX_DESC: usize = 64;
 // HWND_BROADCAST doesn't appear to be in windows crate?
 const HWND_BROADCAST: HWND = HWND(0xFFFF);
 
-// define markers for unlimited session lap and time
+/// define markers for unlimited session laps
 pub const IRSDK_UNLIMITED_LAPS: i32 = 32767;
+
+/// define markers for unlimited session time (in seconds)
 pub const IRSDK_UNLIMITED_TIME: f64 = 604800.0;
 
+/// Client is main entry point into the library. Create a client and then you can
+/// access Sessions that have the telemetry data in then.
 pub struct Client {
     conn: Option<Rc<Connection>>,
-    session_id: i32, // Incremented each time we issue a new session. Allows for session to determine its expired even if
-                     // iRacing started a new session.
+    // Incremented each time we issue a new session. Allows for session to determine its expired even if
+    // iRacing started a new session.
+    session_id: i32,
 }
 impl Client {
+    /// creates a new Client
     pub fn new() -> Client {
         Client {
             conn: None,
@@ -54,6 +73,14 @@ impl Client {
             },
         }
     }
+    /// When iRacing is running, then a Session will be available that contains the
+    /// telemetry data. When iRacing is not running, then this returns None.
+    /// see also wait_for_session (When it exists)
+    ///
+    /// # Safety
+    /// Creating a session requires dealing with memory mapped files and c strucutres
+    /// that are in them. A mismatch between our definition of the struct and iRacings
+    /// definition could cause chaos.
     pub unsafe fn session(&mut self) -> Option<Session> {
         if !self.connect() {
             None
@@ -76,15 +103,36 @@ impl Client {
     }
     // TODO wait_for_session()
 }
+impl Default for Client {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+/// The outcome of trying to read a row of telemetery data.
 #[derive(Debug, PartialEq)]
 pub enum DataUpdateResult {
+    /// The data was updated, and the new values are available via value & var_value
     Updated,
+    /// There's no new data available, the previous data is still available.
     NoUpdate,
+    /// We were unable to copy the row of data out of the iRacing buffer and into
+    /// our own. This is usually a timing issue, or an extremely slow CPU.
     FailedToCopyRow,
+    /// When iRacing is closed, attempts to get new data will return SessionExpired.
     SessionExpired,
 }
 
+/// A Session is used to access data from iRacing.
+///
+/// The data is split between metadata about the available data, and the data itself
+/// The metadata (returned in a Var) is valid for the life of the Session. The
+/// Var can be used to get the current value for that variable out of the last read
+/// row of data.
+///
+/// # Safety
+/// All the method in Session are marked as unsafe. They all ultimately interact with
+/// memory mapped data from iRacing in addition some use Win32 APIs as well.
 #[derive(Debug)]
 pub struct Session {
     session_id: i32,
@@ -94,12 +142,25 @@ pub struct Session {
     expired: bool,
 }
 impl Session {
+    /// Is this session still connected to the iRacing data.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn connected(&self) -> bool {
         !self.expired()
     }
+    /// Has this session expired? i.e. no longer connected to iRacing.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn expired(&self) -> bool {
         self.expired || (!self.conn.connected())
     }
+    /// Waits for upto 'wait' amount of time for a new row of data to be available.
+    /// The wait value should not exceed an u32's worth of milliseconds, approx ~49 days
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn wait_for_data(&mut self, wait: Duration) -> DataUpdateResult {
         let r = self.get_new_data();
         if r == DataUpdateResult::NoUpdate {
@@ -109,6 +170,10 @@ impl Session {
             r
         }
     }
+    /// Attempt to get newer data from iRacing.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn get_new_data(&mut self) -> DataUpdateResult {
         if self.expired() {
             self.expired = true;
@@ -137,6 +202,11 @@ impl Session {
             Ordering::Equal => DataUpdateResult::NoUpdate,
         }
     }
+    /// dump_vars is for diagnostics and investigation, it writes out all the
+    /// variables definitions and their current value.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn dump_vars(&self) {
         for var_header in self.conn.variables() {
             let var = Var {
@@ -155,6 +225,15 @@ impl Session {
             );
         }
     }
+    /// find_var will look for an iracing data point/variable with
+    /// the supplied name (case sensitive). None is returned if its
+    /// unable to find a matching item. The return Var is only
+    /// valid for use with the Session that created it.
+    ///
+    /// TODO: what happens if you call find_var after the session has expired?
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn find_var(&self, name: &str) -> Option<Var> {
         for var_header in self.conn.variables() {
             if var_header.has_name(name) {
@@ -166,6 +245,11 @@ impl Session {
         }
         None
     }
+    /// return the value of the supplied variable as of the most recently fetched row of data.
+    /// this will panic if you pass a Var instance generated by a different Session instance.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn var_value(&self, var: &Var) -> Value {
         assert_eq!(
             var.session_id, self.session_id,
@@ -195,19 +279,43 @@ impl Session {
             }
         }
     }
+    /// Read the value of the supplied variable, and convert it to the relevent rust type. The
+    /// rust type can be a primitive such as i32,f32,f64 or one of the bitfield/enums defined
+    /// in the flags package.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn value<T: FromValue>(&self, var: &Var) -> Result<T, Error> {
         let v = self.var_value(var);
         T::var_result(&v)
     }
+    /// iRacing has a second set of data called session_info that changes at a much slower rate.
+    /// session_info_update is incremented each time the session_info data is updated.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn session_info_update(&self) -> i32 {
         (*self.conn.header).session_info_update
     }
+    /// Returns the current Session info string. This is a Yaml formatted string that you'll
+    /// need to parse.
+    ///
+    /// # Safety
+    /// see details on Session
     pub unsafe fn session_info(&self) -> String {
         let bytes = self.conn.session_info();
         // as we're using replace, this should not ever return an error
         WINDOWS_1252.decode(bytes, DecoderTrap::Replace).unwrap()
     }
 
+    /// A number of things can be controlled in iRacing remotely via broadcast messages.
+    /// This will send the supplied message. There is no way to determine that iRacing has
+    /// actually acted on the message. Many of the messages only work when the simulator
+    /// is in a specific state.
+    ///
+    /// # Safety
+    /// Unlike the rest of Session, this doesn't interact with the memory mapped data,but
+    /// it does use Win32 calls to broadcast the message to iRacing.
     pub unsafe fn broadcast_msg(&self, msg: flags::BroadcastMsg) -> Result<(), WIN32_ERROR> {
         let (cmd_msg_id, (var1, var2)) = msg.params();
         let x = makelong(cmd_msg_id, var1);
@@ -230,11 +338,19 @@ fn makelong(var1: i16, var2: i16) -> isize {
     x as isize
 }
 
+/// Var is a handle to a variable or telemetry data point.
+///
+/// Var's are obtained via the find_var() method on Session, and are then
+/// valid for the lifetime of that Session. They can only be used with the
+/// Session that generated them.
+/// In addition the metadata available from Var, Var is also used as a key
+/// to read the current value for the item.
 pub struct Var {
     hdr: IrsdkVarHeader,
     session_id: i32,
 }
 impl Var {
+    /// returns the data type of this item, e.g. Float, Int
     pub fn var_type(&self) -> VarType {
         self.hdr.var_type
     }
@@ -247,6 +363,10 @@ impl Var {
     pub fn unit(&self) -> &str {
         self.hdr.unit().unwrap()
     }
+    /// returns the count. This indicates how many instances of the datapoint value
+    /// are associated with this variable. Typically its one, but there is a small
+    /// subset of points that have more, typically 64 (i.e. one per driver).
+    /// Values for Var's with a count > 1 are returned as slices of the relevent type
     pub fn count(&self) -> usize {
         self.hdr.count as usize
     }
@@ -257,6 +377,10 @@ impl fmt::Debug for Var {
     }
 }
 
+/// Connection is a wrapper around the mechanics of opening the iRacing generated memory mapped file
+/// that all the data comes from. Its mostly dealing with win32 shenanigans.
+///
+/// The data returned out of Connection is typically directly mapped into the underlying memory mapped data.
 #[derive(Debug)]
 struct Connection {
     file_mapping: HANDLE,
@@ -437,12 +561,15 @@ impl IrsdkVarHeader {
     }
 }
 
+/// These errors can be returned when accessing variable values and there is a mismatch
+/// between the type of the variable, and the type of value asked for.
 #[derive(Debug)]
 pub enum Error {
     InvalidType,
     InvalidEnumValue(i32),
 }
 
+/// The different types of variables or datapoints available.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VarType {
     // 1 byte
@@ -462,6 +589,7 @@ pub enum VarType {
     Etcount = 6,
 }
 
+/// An instance of a value for a variable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value<'a> {
     Char(u8),
