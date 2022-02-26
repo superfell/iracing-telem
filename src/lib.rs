@@ -52,7 +52,7 @@ pub struct Client {
     session_id: i32,
 }
 impl Client {
-    /// creates a new Client
+    /// Creates a new Client
     pub fn new() -> Client {
         Client {
             conn: None,
@@ -410,7 +410,7 @@ impl Var {
     }
     /// returns the size of a value for this Var in bytes.
     fn size(&self) -> usize {
-        return self.var_type().size() * self.count();
+        self.var_type().size() * self.count()
     }
 }
 impl fmt::Debug for Var {
@@ -897,5 +897,27 @@ mod tests {
         assert_eq!(1, f(VarType::Char, 1).size());
         assert_eq!(3, f(VarType::Bool, 3).size());
         assert_eq!(1, f(VarType::Bool, 1).size());
+    }
+
+    #[test]
+    fn test_irsdk_var_header() {
+        let mut h = IrsdkVarHeader {
+            var_type: VarType::Float,
+            offset: 32,
+            count: 1,
+            count_as_time: 0,
+            pad: [0; 3],
+            name: [0; IRSDK_MAX_STRING],
+            desc: [0; IRSDK_MAX_DESC],
+            unit: [0; IRSDK_MAX_STRING],
+        };
+        // there must be an easier way than this
+        h.name[0] = 'b' as u8;
+        h.name[1] = 'o' as u8;
+        h.name[2] = 'b' as u8;
+        assert_eq!(Ok("bob"), h.name());
+        assert!(h.has_name("bob"));
+        assert!(!h.has_name("alice"));
+        assert!(!h.has_name("bobby"));
     }
 }
