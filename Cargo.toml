@@ -3,10 +3,10 @@ name = "iracing-telem"
 version = "0.1.0"
 edition = "2021"
 description = "Rust port of the iRacing telemetry SDK."
-keywords= ["iracing","telemetry","racing","irsdk"]
-licence="BSD-3-Clause"
 homepage="https://github.com/superfell/iracing-telem"
 repository="https://github.com/superfell/iracing-telem"
+license="BSD-3-Clause"
+keywords= ["iracing","telemetry","racing","irsdk"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
