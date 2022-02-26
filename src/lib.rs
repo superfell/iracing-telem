@@ -18,8 +18,8 @@ use std::cmp::Ordering;
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
 use std::rc::Rc;
-use std::slice;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::{slice, thread};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, HANDLE, HWND, LPARAM, WIN32_ERROR, WPARAM,
 };
@@ -75,7 +75,7 @@ impl Client {
     }
     /// When iRacing is running, then a Session will be available that contains the
     /// telemetry data. When iRacing is not running, then this returns None.
-    /// see also wait_for_session (When it exists)
+    /// See also wait_for_session.
     ///
     /// # Safety
     /// Creating a session requires dealing with memory mapped files and c strucutres
@@ -90,18 +90,50 @@ impl Client {
             let mut s = Session {
                 session_id: sid,
                 conn: self.conn.as_ref().unwrap().clone(),
-                last_tick_count: 0,
+                last_tick_count: -2,
                 data: bytes::BytesMut::new(),
                 expired: false,
             };
-            if DataUpdateResult::Updated == s.get_new_data() {
+            let d = s.wait_for_data(Duration::from_millis(16));
+            if DataUpdateResult::Updated == d {
                 Some(s)
             } else {
                 None
             }
         }
     }
-    // TODO wait_for_session()
+    /// Will wait upto the the supplied wait duration for a iRacing session to be available.
+    /// If the wait timeout's returns None, otherwise returns the new Session.
+    /// Wait must fit into a 32bit number of milliseconds, about 49 days. otherwise it'll panic.
+    ///
+    /// # Safety
+    /// Creating a session requires dealing with memory mapped files and c strucutres
+    /// that are in them. A mismatch between our definition of the struct and iRacings
+    /// definition could cause chaos.
+    pub unsafe fn wait_for_session(&mut self, wait: Duration) -> Option<Session> {
+        // If we had a prior connection then we can use the new data event to wait for the
+        // session. Otherwise we need to poll session fn above.
+        match &self.conn {
+            Some(c) => {
+                c.wait_for_new_data(wait);
+                self.session()
+            }
+            None => {
+                let start = Instant::now();
+                let loop_wait = Duration::from_millis(1000);
+                loop {
+                    let r = self.session();
+                    if r.is_some() || start.elapsed() > wait {
+                        return r;
+                    }
+                    // It takes iRacing a few seconds to get from when you can connect
+                    // to the telemetry to when you can actually do anything in the simulator
+                    // so a once a second check seems like plenty.
+                    thread::sleep(loop_wait);
+                }
+            }
+        }
+    }
 }
 impl Default for Client {
     fn default() -> Self {
@@ -488,6 +520,7 @@ impl Drop for Connection {
         }
     }
 }
+
 #[repr(C)]
 struct IrsdkBuf {
     tick_count: i32, // used to detect changes in data
