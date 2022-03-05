@@ -323,9 +323,12 @@ impl Session {
     ///
     /// # Safety
     /// see details on Session
-    pub unsafe fn value<T: FromValue>(&self, var: &Var) -> Result<T, Error> {
+    pub unsafe fn value<'a, T>(&'a self, var: &Var) -> Result<T, T::Error>
+    where
+        T: TryFrom<Value<'a>, Error = Error>,
+    {
         let v = self.var_value(var);
-        T::var_result(&v)
+        v.try_into()
     }
     /// iRacing has a second set of data called session_info that changes at a much slower rate.
     /// session_info_update is incremented each time the session_info data is updated.
@@ -663,11 +666,6 @@ pub enum Value<'a> {
     Doubles(&'a [f64]),
 }
 
-pub trait FromValue: Sized {
-    /// Converts an iracing Value into Rust value.
-    fn var_result(value: &Value) -> Result<Self, Error>;
-}
-
 impl<'a> Value<'a> {
     pub fn as_f64(&self) -> Result<f64, Error> {
         match *self {
@@ -700,31 +698,31 @@ impl<'a> Value<'a> {
             _ => Err(Error::InvalidType),
         }
     }
-    pub fn as_f64s(&self) -> Result<&[f64], Error> {
+    pub fn as_f64s(&self) -> Result<&'a [f64], Error> {
         match *self {
             Value::Doubles(f) => Ok(f),
             _ => Err(Error::InvalidType),
         }
     }
-    pub fn as_f32s(&self) -> Result<&[f32], Error> {
-        match *self {
+    pub fn as_f32s(self) -> Result<&'a [f32], Error> {
+        match self {
             Value::Floats(f) => Ok(f),
             _ => Err(Error::InvalidType),
         }
     }
-    pub fn as_i32s(&self) -> Result<&[i32], Error> {
+    pub fn as_i32s(&self) -> Result<&'a [i32], Error> {
         match *self {
             Value::Ints(f) => Ok(f),
             _ => Err(Error::InvalidType),
         }
     }
-    pub fn as_bools(&self) -> Result<&[bool], Error> {
+    pub fn as_bools(&self) -> Result<&'a [bool], Error> {
         match *self {
             Value::Bools(f) => Ok(f),
             _ => Err(Error::InvalidType),
         }
     }
-    pub fn as_u8s(&self) -> Result<&[u8], Error> {
+    pub fn as_u8s(&self) -> Result<&'a [u8], Error> {
         match *self {
             Value::Chars(f) => Ok(f),
             _ => Err(Error::InvalidType),
@@ -732,45 +730,81 @@ impl<'a> Value<'a> {
     }
 }
 
-impl FromValue for bool {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        value.as_bool()
+impl TryFrom<Value<'_>> for bool {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        v.as_bool()
     }
 }
-impl FromValue for u8 {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        value.as_u8()
+impl TryFrom<Value<'_>> for u8 {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        v.as_u8()
     }
 }
-impl FromValue for i32 {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        value.as_i32()
+impl TryFrom<Value<'_>> for i32 {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        v.as_i32()
     }
 }
-impl FromValue for f32 {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        value.as_f32()
+impl TryFrom<Value<'_>> for f32 {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        v.as_f32()
     }
 }
-impl FromValue for f64 {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for f64 {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         value.as_f64()
     }
 }
-impl FromValue for flags::EngineWarnings {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        let v = value.as_i32()?;
-        Ok(Self::from_bits_truncate(v))
+impl<'a> TryFrom<Value<'a>> for &'a [bool] {
+    type Error = Error;
+    fn try_from(v: Value<'a>) -> Result<Self, Self::Error> {
+        v.as_bools()
     }
 }
-impl FromValue for flags::Flags {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        let v = value.as_i32()?;
-        Ok(Self::from_bits_truncate(v as u32))
+impl<'a> TryFrom<Value<'a>> for &'a [u8] {
+    type Error = Error;
+    fn try_from(v: Value<'a>) -> Result<Self, Self::Error> {
+        v.as_u8s()
     }
 }
-impl FromValue for flags::SessionState {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl<'a> TryFrom<Value<'a>> for &'a [i32] {
+    type Error = Error;
+    fn try_from(v: Value<'a>) -> Result<Self, Self::Error> {
+        v.as_i32s()
+    }
+}
+impl<'a> TryFrom<Value<'a>> for &'a [f32] {
+    type Error = Error;
+    fn try_from(v: Value<'a>) -> Result<Self, Self::Error> {
+        v.as_f32s()
+    }
+}
+impl<'a> TryFrom<Value<'a>> for &'a [f64] {
+    type Error = Error;
+    fn try_from(v: Value<'a>) -> Result<Self, Self::Error> {
+        v.as_f64s()
+    }
+}
+impl TryFrom<Value<'_>> for flags::EngineWarnings {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        Ok(Self::from_bits_truncate(v.as_i32()?))
+    }
+}
+impl TryFrom<Value<'_>> for flags::Flags {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        Ok(Self::from_bits_truncate(v.as_i32()? as u32))
+    }
+}
+impl TryFrom<Value<'_>> for flags::SessionState {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -778,8 +812,9 @@ impl FromValue for flags::SessionState {
         }
     }
 }
-impl FromValue for flags::TrackLocation {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for flags::TrackLocation {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -787,8 +822,9 @@ impl FromValue for flags::TrackLocation {
         }
     }
 }
-impl FromValue for flags::TrackSurface {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for flags::TrackSurface {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -796,8 +832,9 @@ impl FromValue for flags::TrackSurface {
         }
     }
 }
-impl FromValue for flags::CarLeftRight {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for flags::CarLeftRight {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -805,20 +842,21 @@ impl FromValue for flags::CarLeftRight {
         }
     }
 }
-impl FromValue for flags::CameraState {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        let v = value.as_i32()?;
-        Ok(Self::from_bits_truncate(v))
+impl TryFrom<Value<'_>> for flags::CameraState {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        Ok(Self::from_bits_truncate(v.as_i32()?))
     }
 }
-impl FromValue for flags::PitSvcFlags {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        let v = value.as_i32()?;
-        Ok(Self::from_bits_truncate(v))
+impl TryFrom<Value<'_>> for flags::PitSvcFlags {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        Ok(Self::from_bits_truncate(v.as_i32()?))
     }
 }
-impl FromValue for flags::PitSvcStatus {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for flags::PitSvcStatus {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -826,8 +864,9 @@ impl FromValue for flags::PitSvcStatus {
         }
     }
 }
-impl FromValue for flags::PaceMode {
-    fn var_result(value: &Value) -> Result<Self, Error> {
+impl TryFrom<Value<'_>> for flags::PaceMode {
+    type Error = Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         let v = value.as_i32()?;
         match num::FromPrimitive::from_i32(v) {
             Some(t) => Ok(t),
@@ -835,10 +874,10 @@ impl FromValue for flags::PaceMode {
         }
     }
 }
-impl FromValue for flags::PaceFlags {
-    fn var_result(value: &Value) -> Result<Self, Error> {
-        let v = value.as_i32()?;
-        Ok(Self::from_bits_truncate(v))
+impl TryFrom<Value<'_>> for flags::PaceFlags {
+    type Error = Error;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        Ok(Self::from_bits_truncate(v.as_i32()?))
     }
 }
 
