@@ -296,12 +296,12 @@ impl Session {
         let x = self.data.as_ptr().add(var_offset);
         if var.hdr.count == 1 {
             match var.hdr.var_type {
-                VarType::Char => Value::Char(*x),
-                VarType::Bool => Value::Bool(*(x as *const bool)),
-                VarType::Int => Value::Int(*(x as *const i32)),
-                VarType::Bitfield => Value::Bitfield(*(x as *const i32)),
-                VarType::Float => Value::Float(*(x as *const f32)),
-                VarType::Double => Value::Double(*(x as *const f64)),
+                VarType::Char => Value::Char(std::ptr::read_unaligned(x as *const u8)),
+                VarType::Bool => Value::Bool(std::ptr::read_unaligned(x as *const bool)),
+                VarType::Int => Value::Int(std::ptr::read_unaligned(x as *const i32)),
+                VarType::Bitfield => Value::Bitfield(std::ptr::read_unaligned(x as *const i32)),
+                VarType::Float => Value::Float(std::ptr::read_unaligned(x as *const f32)),
+                VarType::Double => Value::Double(std::ptr::read_unaligned(x as *const f64)),
                 _ => todo!(), // ETCount
             }
         } else {
