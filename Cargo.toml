@@ -1,6 +1,6 @@
 [package]
 name = "iracing-telem"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Rust port of the iRacing telemetry SDK."
 homepage="https://github.com/superfell/iracing-telem"
