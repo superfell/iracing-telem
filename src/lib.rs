@@ -713,6 +713,7 @@ impl<'a> Value<'a> {
     pub fn as_i32s(&self) -> Result<&'a [i32], Error> {
         match *self {
             Value::Ints(f) => Ok(f),
+            Value::Bitfields(f) => Ok(f),
             _ => Err(Error::InvalidType),
         }
     }
