@@ -307,12 +307,12 @@ impl Session {
         } else {
             let l = var.count();
             match var.hdr.var_type {
-                VarType::Char => Value::Chars(slice::from_raw_parts(x, l)),
-                VarType::Bool => Value::Bools(slice::from_raw_parts(x as *const bool, l)),
-                VarType::Int => Value::Ints(slice::from_raw_parts(x as *const i32, l)),
-                VarType::Bitfield => Value::Bitfields(slice::from_raw_parts(x as *const i32, l)),
-                VarType::Float => Value::Floats(slice::from_raw_parts(x as *const f32, l)),
-                VarType::Double => Value::Doubles(slice::from_raw_parts(x as *const f64, l)),
+                VarType::Char => Value::Chars(&*std::ptr::slice_from_raw_parts(x, l)),
+                VarType::Bool => Value::Bools(&*std::ptr::slice_from_raw_parts(x as *const bool, l)),
+                VarType::Int => Value::Ints(&*std::ptr::slice_from_raw_parts(x as *const i32, l)),
+                VarType::Bitfield => Value::Bitfields(&*std::ptr::slice_from_raw_parts(x as *const i32, l)),
+                VarType::Float => Value::Floats(&*std::ptr::slice_from_raw_parts(x as *const f32, l)),
+                VarType::Double => Value::Doubles(&*std::ptr::slice_from_raw_parts(x as *const f64, l)),
                 _ => todo!(), // ETCount
             }
         }
